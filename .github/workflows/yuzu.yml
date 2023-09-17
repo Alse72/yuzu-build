@@ -82,15 +82,22 @@ jobs:
     steps:
       - name: Checkout yuzu-ea
         if: ${{ inputs.build_type == 'yuzu-ea' }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: yuzu-emu/yuzu
           fetch-depth: 0
       - name: Checkout yuzu-mainline
         if: ${{ inputs.build_type == 'yuzu-mainline' }}
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: yuzu-emu/yuzu-mainline
+      - name: Set up buildcache
+        uses: actions/cache@v3
+        with:
+          path: ~/.buildcache
+          key: msvc-${{ github.sha }}
+          restore-keys: |
+            msvc-
       - name: Configure git
         if: ${{ inputs.build_type == 'yuzu-ea' }}
         run: |
@@ -99,6 +106,17 @@ jobs:
           git config --global pull.rebase true
           git config --global rebase.autoStash true
           git config --global fetch.prune true
+      - name: Install buildcache
+        run: |
+          $ErrorActionPreference = "Stop"
+          $BuildCacheVer = "v0.28.4"
+          $File = "buildcache-windows.zip"
+          $Uri = "https://github.com/mbitsnbites/buildcache/releases/download/$BuildCacheVer/$File"
+          $WebClient = New-Object System.Net.WebClient
+          $WebClient.DownloadFile($Uri, $File)
+          7z x $File
+          $CurrentDir = Convert-Path .
+          echo "$CurrentDir/buildcache/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - name: Install Vulkan SDK
         run: .\.ci\scripts\windows\install-vulkan-sdk.ps1
       - name: Merge PRs
@@ -159,37 +177,72 @@ jobs:
         id: cache-modules-restore
         with:
           path: |
-            externals
             .git\modules
             .git\config
-          key: modules2-${{ hashFiles('submodule.status') }}
+            externals/enet
+            externals/inih/inih
+            externals/cubeb
+            externals/dynarmic
+            externals/libusb/libusb
+            externals/discord-rpc
+            externals/Vulkan-Headers
+            externals/sirit
+            externals/mbedtls
+            externals/xbyak
+            externals/opus/opus
+            externals/SDL
+            externals/cpp-httplib
+            externals/ffmpeg/ffmpeg
+            externals/vcpkg
+            externals/cpp-jwt
+            externals/libadrenotools
+            externals/nx_tzdb/tzdb_to_nx
+            externals/VulkanMemoryAllocator
+          key: modules3-${{ hashFiles('submodule.status') }}
       - name: Restore cmake cache
         uses: actions/cache/restore@v3
         id: cache-cmake-restore
         with:
           path: build
-          key: cmake3-${{ hashFiles('CMakeModules/*.cmake') }}
+          key: cmake4-${{ hashFiles('CMakeLists.txt', 'src/**/CMakeLists.txt', 'externals/**/CMakeLists.txt') }}
       - name: Set up MSVC
         uses: ilammy/msvc-dev-cmd@v1
       - name: Configure
         env:
           CC: cl.exe
           CXX: cl.exe
-          CXXFLAGS: "/Gw"
         run: |
           glslangValidator --version
           git submodule update --init externals/vcpkg
           git submodule update --init --recursive --depth 1
           mkdir build -ErrorAction SilentlyContinue
-          cmake . -B build -GNinja -DCMAKE_POLICY_DEFAULT_CMP0069=NEW -DYUZU_ENABLE_LTO=ON -DYUZU_USE_BUNDLED_QT=1 -DYUZU_USE_BUNDLED_SDL2=1 -DYUZU_USE_QT_WEB_ENGINE="$env:YUZU_USE_QT_WEB_ENGINE" -DENABLE_COMPATIBILITY_LIST_DOWNLOAD=ON -DYUZU_ENABLE_COMPATIBILITY_REPORTING=OFF -DYUZU_TESTS=OFF -DUSE_DISCORD_PRESENCE="$env:USE_DISCORD_PRESENCE" -DENABLE_QT_TRANSLATION=ON -DDISPLAY_VERSION="early-access" -DCMAKE_BUILD_TYPE=Release -DYUZU_CRASH_DUMPS="$env:YUZU_CRASH_DUMPS" -DENABLE_CUBEB="$env:ENABLE_CUBEB" -DENABLE_LIBUSB="$env:ENABLE_LIBUSB" -DENABLE_WEB_SERVICE="$env:ENABLE_WEB_SERVICE" -DYUZU_ROOM="$env:YUZU_ROOM"
+          cmake . -B build -GNinja -DCMAKE_TOOLCHAIN_FILE="CMakeModules/MSVCCache.cmake" -DUSE_CCACHE=ON -DCMAKE_POLICY_DEFAULT_CMP0069=NEW -DYUZU_ENABLE_LTO=ON -DYUZU_USE_BUNDLED_QT=1 DGIT_BRANCH-DYUZU_USE_BUNDLED_SDL2=1 -DYUZU_USE_QT_WEB_ENGINE="$env:YUZU_USE_QT_WEB_ENGINE" -DENABLE_COMPATIBILITY_LIST_DOWNLOAD=ON -DYUZU_ENABLE_COMPATIBILITY_REPORTING=OFF -DYUZU_TESTS=OFF -DUSE_DISCORD_PRESENCE="$env:USE_DISCORD_PRESENCE" -DENABLE_QT_TRANSLATION=ON -DDISPLAY_VERSION="early-access" -DCMAKE_BUILD_TYPE=Release -DYUZU_CRASH_DUMPS="$env:YUZU_CRASH_DUMPS" -DENABLE_CUBEB="$env:ENABLE_CUBEB" -DENABLE_LIBUSB="$env:ENABLE_LIBUSB" -DENABLE_WEB_SERVICE="$env:ENABLE_WEB_SERVICE" -DYUZU_ROOM="$env:YUZU_ROOM"
       - name: Save modules cache
         uses: actions/cache/save@v3
         if: steps.cache-modules-restore.outputs.cache-hit != 'true'
         with:
           path: |
-            externals
             .git\modules
             .git\config
+            externals/enet
+            externals/inih/inih
+            externals/cubeb
+            externals/dynarmic
+            externals/libusb/libusb
+            externals/discord-rpc
+            externals/Vulkan-Headers
+            externals/sirit
+            externals/mbedtls
+            externals/xbyak
+            externals/opus/opus
+            externals/SDL
+            externals/cpp-httplib
+            externals/ffmpeg/ffmpeg
+            externals/vcpkg
+            externals/cpp-jwt
+            externals/libadrenotools
+            externals/nx_tzdb/tzdb_to_nx
+            externals/VulkanMemoryAllocator
           key: ${{ steps.cache-modules-restore.outputs.cache-primary-key }}
       - name: Save cmake cache
         uses: actions/cache/save@v3
@@ -198,7 +251,9 @@ jobs:
           path: build
           key: ${{ steps.cache-cmake-restore.outputs.cache-primary-key }}
       - name: Build
-        run: cmake --build build -j2
+        run: cd build ; ninja 
+      - name: Buildcache Summary
+        run: buildcache -s
       - name: Pack 7z
         run: |
           .\.ci\scripts\windows\upload.ps1
